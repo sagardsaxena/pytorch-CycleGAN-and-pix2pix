@@ -24,9 +24,56 @@ from data import create_dataset
 from models import create_model
 from util.visualizer import Visualizer
 
+import sys
+sys.path.append('../..')
+
+from src.baseline.cloud_dataset import CloudDataset
+from src.train import add_paths, split_features_labels
+from pathlib import Path
+import pandas as pd
+import pickle
+from tqdm import tqdm
+import torch
+
 if __name__ == '__main__':
     opt = TrainOptions().parse()   # get training options
-    dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
+    if not opt.train_clouds:
+        dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
+    else:
+        train_meta = pd.read_csv("../../data/train_metadata.csv")
+        train_meta = add_paths(train_meta, 
+                               Path("../../data/train_features"), 
+                               Path("../../data/train_labels"),
+                               ["B02", "B03", "B04", "B08"])
+        
+        # Band Normalization and Means
+        with open("../../assets/data_norm.pkl", "rb") as f:
+            norm = pickle.load(f)
+    
+        # Split features and labels
+        train_x, train_y = split_features_labels(train_meta)
+    
+        # Create cloud dataset with simple augmentation and basic bands
+        cloud_dataset = CloudDataset(
+            x_paths=train_x,
+            bands=["B02", "B03", "B04", "B08"],
+            y_paths=train_y,
+            transforms="simple",
+            norm=norm,
+            pull_bands=False,
+            cyclegan=True
+        )
+    
+        # Create data loader with cloud dataset
+        data_loader = torch.utils.data.DataLoader(
+            cloud_dataset,
+            batch_size=opt.batch_size,
+            num_workers=int(opt.num_threads),
+            shuffle=True,
+            pin_memory=True,
+            persistent_workers=True)
+        dataset = data_loader
+
     dataset_size = len(dataset)    # get the number of images in the dataset.
     print('The number of training images = %d' % dataset_size)
 
